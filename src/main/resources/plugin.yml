@@ -1,0 +1,33 @@
+name: PlayerVaults
+authors: [drtshock, kashike, vk2gpz]
+website: ${project.url}
+
+version: ${project.version}
+main: com.drtshock.playervaults.PlayerVaults
+softdepend: [Vault]
+api-version: 1.13
+
+commands:
+  pv:
+    description: Open a vault.
+    aliases: [vault, chest, playervaults, vc]
+  pvdel:
+    description: Delete a vault.
+    aliases: [vaultdel]
+  pvsign:
+    description: Manage vault signs.
+    aliases: [vaultsign]
+  pvconvert:
+    description: Convert other plugins to PlayerVaultsX.
+    aliases: [vaultconvert]
+  pvreload:
+    description: Reload the configuration and language files.
+    permission: playervaults.admin
+
+permissions:
+  playervaults.admin:
+    description: Grants access to admin commands for vaults.
+    default: op
+  playervaults.bypassblockeditems:
+    description: Grants access to bypass blocked vault items.
+    default: op
