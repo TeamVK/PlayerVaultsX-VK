@@ -25,7 +25,6 @@ import com.drtshock.playervaults.vaultmanagement.VaultOperations;
 import com.drtshock.playervaults.vaultmanagement.VaultViewInfo;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
@@ -38,7 +37,9 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 
 public class SignListener implements Listener {
     private PlayerVaults plugin;
@@ -54,15 +55,18 @@ public class SignListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent event) {
-        if (!PlayerVaults.getInstance().getConfig().getBoolean("signs-enabled")) {
+        if (!PlayerVaults.getInstance().getConf().isSigns()) {
             return;
         }
         Player player = event.getPlayer();
+        if (player.isSleeping() || player.isDead() || !player.isOnline()) {
+            return;
+        }
         Block block = event.getClickedBlock();
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             if (PlayerVaults.getInstance().getInVault().containsKey(player.getUniqueId().toString())) {
                 // Different inventories that we don't want the player to open.
-                if (isInvalidBlock(block.getType())) {
+                if (isInvalidBlock(block)) {
                     event.setCancelled(true);
                 }
             }
@@ -73,7 +77,7 @@ public class SignListener implements Listener {
             String owner = self ? null : PlayerVaults.getInstance().getSetSign().get(player.getName()).getOwner();
             PlayerVaults.getInstance().getSetSign().remove(player.getName());
             event.setCancelled(true);
-            if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+            if (event.getAction() == Action.RIGHT_CLICK_BLOCK || event.getAction() == Action.LEFT_CLICK_BLOCK) {
                 if (block != null && plugin.isSign(block.getType())) {
                     Sign s = (Sign) block.getState();
                     Location l = s.getLocation();
@@ -110,7 +114,7 @@ public class SignListener implements Listener {
                         boolean self = PlayerVaults.getInstance().getSigns().getBoolean(world + ";;" + x + ";;" + y + ";;" + z + ".self", false);
                         String owner = self ? player.getName() : PlayerVaults.getInstance().getSigns().getString(world + ";;" + x + ";;" + y + ";;" + z + ".owner");
                         OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(owner != null ? owner : event.getPlayer().getName()); // Not best way but :\
-                        if (offlinePlayer == null || !offlinePlayer.hasPlayedBefore()) {
+                        if (offlinePlayer == null || (!offlinePlayer.isOnline() && !offlinePlayer.hasPlayedBefore())) {
                             player.sendMessage(Lang.TITLE.toString() + Lang.VAULT_DOES_NOT_EXIST.toString());
                             return;
                         }
@@ -120,6 +124,12 @@ public class SignListener implements Listener {
                                 Inventory inv = VaultManager.getInstance().loadOwnVault(player, num, VaultOperations.getMaxVaultSize(player));
                                 if (inv != null) {
                                     player.openInventory(inv);
+
+                                    // Check if the inventory was actually opened
+                                    if (player.getOpenInventory().getTopInventory() instanceof CraftingInventory || player.getOpenInventory().getTopInventory() == null) {
+                                        PlayerVaults.debug(String.format("Cancelled opening sign vault.", player.getName()));
+                                        return; // inventory open event was cancelled.
+                                    }
                                 }
                             } else {
                                 player.sendMessage(Lang.TITLE.toString() + Lang.NO_PERMS.toString());
@@ -131,6 +141,12 @@ public class SignListener implements Listener {
                                 player.sendMessage(Lang.TITLE.toString() + Lang.VAULT_DOES_NOT_EXIST.toString());
                             } else {
                                 player.openInventory(inv);
+
+                                // Check if the inventory was actually opened
+                                if (player.getOpenInventory().getTopInventory() instanceof CraftingInventory || player.getOpenInventory().getTopInventory() == null) {
+                                    PlayerVaults.debug(String.format("Cancelled opening non-self sign vault.", player.getName()));
+                                    return; // inventory open event was cancelled.
+                                }
                             }
                         }
                         PlayerVaults.getInstance().getInVault().put(player.getUniqueId().toString(), new VaultViewInfo(self ? player.getUniqueId().toString() : offlinePlayer.getUniqueId().toString(), num));
@@ -145,16 +161,8 @@ public class SignListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onBlockPhysics(BlockPhysicsEvent event) {
-        if (!PlayerVaults.getInstance().getConfig().getBoolean("signs-enabled")) {
-            return;
-        }
-        blockChangeCheck(event.getBlock().getLocation());
-    }
-
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityChangeBlock(EntityChangeBlockEvent event) {
-        if (!PlayerVaults.getInstance().getConfig().getBoolean("signs-enabled")) {
+        if (!PlayerVaults.getInstance().getConf().isSigns()) {
             return;
         }
         blockChangeCheck(event.getBlock().getLocation());
@@ -162,7 +170,7 @@ public class SignListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
-        if (!PlayerVaults.getInstance().getConfig().getBoolean("signs-enabled")) {
+        if (!PlayerVaults.getInstance().getConf().isSigns()) {
             return;
         }
         blockChangeCheck(event.getBlock().getLocation());
@@ -188,18 +196,8 @@ public class SignListener implements Listener {
         }
     }
 
-    private boolean isInvalidBlock(Material material) {
-        if (PlayerVaults.getInstance().getVersion().contains("v1_13")) {
-            PlayerVaults.debug("[PlayerVaults] [Debug/SignListener] Block material checked for >= 1.13");
-            return material == Material.CHEST || material == Material.TRAPPED_CHEST
-                    || material == Material.ENDER_CHEST || material == Material.FURNACE
-                    || material == Material.BREWING_STAND || material == Material.ENCHANTING_TABLE
-                    || material == Material.BEACON;
-        }
-        PlayerVaults.debug("[PlayerVaults] [Debug/SignListener] Block material checked for < 1.13");
-        return material == Material.CHEST || material == Material.TRAPPED_CHEST
-                || material == Material.ENDER_CHEST || material == Material.FURNACE
-                || material == Material.valueOf("BURNING_FURNACE") || material == Material.BREWING_STAND
-                || material == Material.valueOf("ENCHANTMENT_TABLE") || material == Material.BEACON;
+    private boolean isInvalidBlock(Block block) {
+        String type = block.getType().name();
+        return block.getState() instanceof InventoryHolder || type.contains("ENCHANT") || type.equals("ENDER_CHEST");
     }
 }

@@ -25,6 +25,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 
@@ -77,14 +78,11 @@ public class VaultOperations {
         if (sender.hasPermission("playervaults.amount." + number)) {
             return true;
         }
-        /* vk2gpz */
-        int max = PlayerVaults.getInstance().getConfig().getInt("max-number-of-valuts", 100);
-        for (int x = number; x <= max; x++) {
+        for (int x = number; x <= PlayerVaults.getInstance().getMaxVaultAmountPermTest(); x++) {
             if (sender.hasPermission("playervaults.amount." + x)) {
                 return true;
             }
         }
-        /* vk2gpz */
         return false;
     }
 
@@ -92,7 +90,7 @@ public class VaultOperations {
      * Get the max size vault a player is allowed to have.
      *
      * @param name that is having his permissions checked.
-     * @return max size as integer. If no max size is set then it will default to 54.
+     * @return max size as integer. If no max size is set then it will default to the configured default.
      */
     public static int getMaxVaultSize(String name) {
         try {
@@ -102,25 +100,25 @@ public class VaultOperations {
             // Not a UUID
         }
 
-        return 54;
+        return PlayerVaults.getInstance().getDefaultVaultSize();
     }
 
     /**
      * Get the max size vault a player is allowed to have.
      *
      * @param player that is having his permissions checked.
-     * @return max size as integer. If no max size is set then it will default to 54.
+     * @return max size as integer. If no max size is set then it will default to the configured default.
      */
     public static int getMaxVaultSize(OfflinePlayer player) {
         if (player == null || !player.isOnline()) {
-            return 54;
+            return PlayerVaults.getInstance().getDefaultVaultSize();
         }
         for (int i = 6; i != 0; i--) {
             if (player.getPlayer().hasPermission("playervaults.size." + i)) {
                 return i * 9;
             }
         }
-        return 54;
+        return PlayerVaults.getInstance().getDefaultVaultSize();
     }
 
     /**
@@ -132,6 +130,9 @@ public class VaultOperations {
      */
     public static boolean openOwnVault(Player player, String arg) {
         if (isLocked()) {
+            return false;
+        }
+        if (player.isSleeping() || player.isDead() || !player.isOnline()) {
             return false;
         }
         int number;
@@ -156,7 +157,7 @@ public class VaultOperations {
                 player.openInventory(inv);
 
                 // Check if the inventory was actually opened
-                if (player.getOpenInventory().getTopInventory() == null) {
+                if (player.getOpenInventory().getTopInventory() instanceof CraftingInventory || player.getOpenInventory().getTopInventory() == null) {
                     PlayerVaults.debug(String.format("Cancelled opening vault %s for %s from an outside source.", arg, player.getName()));
                     return false; // inventory open event was cancelled.
                 }
@@ -205,6 +206,10 @@ public class VaultOperations {
             return false;
         }
 
+        if (player.isSleeping() || player.isDead() || !player.isOnline()) {
+            return false;
+        }
+
         long time = System.currentTimeMillis();
 
         int number = 0;
@@ -231,6 +236,12 @@ public class VaultOperations {
             player.sendMessage(Lang.TITLE.toString() + Lang.VAULT_DOES_NOT_EXIST.toString());
         } else {
             player.openInventory(inv);
+
+            // Check if the inventory was actually opened
+            if (player.getOpenInventory().getTopInventory() instanceof CraftingInventory || player.getOpenInventory().getTopInventory() == null) {
+                PlayerVaults.debug(String.format("Cancelled opening vault %s for %s from an outside source.", arg, player.getName()));
+                return false; // inventory open event was cancelled.
+            }
             player.sendMessage(Lang.TITLE.toString() + Lang.OPEN_OTHER_VAULT.toString().replace("%v", arg).replace("%p", name));
             PlayerVaults.debug("opening other vault", time);
 
@@ -312,7 +323,7 @@ public class VaultOperations {
     }
 
     /**
-     * Delete all of a player's vaults (Currently goes to vault #100)
+     * Delete all of a player's vaults
      *
      * @param sender The sender executing the deletion.
      * @param holder The user to whom the deleted vault belongs.

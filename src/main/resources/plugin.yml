@@ -1,10 +1,10 @@
 name: PlayerVaults
-authors: [drtshock, kashike, vk2gpz]
+authors: [drtshock, kashike, CmdrKittens]
 website: ${project.url}
 
 version: ${project.version}
 main: com.drtshock.playervaults.PlayerVaults
-softdepend: [Vault]
+softdepend: [Vault, Multiverse-Inventories]
 api-version: 1.13
 
 commands:
@@ -31,3 +31,6 @@ permissions:
   playervaults.bypassblockeditems:
     description: Grants access to bypass blocked vault items.
     default: op
+  playervaults.commands.use:
+    description: Use the command
+    default: true

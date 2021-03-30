@@ -24,6 +24,7 @@ import com.drtshock.playervaults.vaultmanagement.VaultManager;
 import com.drtshock.playervaults.vaultmanagement.VaultViewInfo;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -37,6 +38,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+
+import java.util.stream.Collectors;
 
 public class Listeners implements Listener {
 
@@ -53,13 +56,17 @@ public class Listeners implements Listener {
             Inventory inv = Bukkit.createInventory(null, 6 * 9);
             inv.setContents(inventory.getContents().clone());
 
-            if (inventory.getViewers().size() == 1) {
+            PlayerVaults.debug(inventory.getType() + " " + inventory.getClass().getSimpleName());
+            if (inventory.getViewers().size() <= 1) {
+                PlayerVaults.debug("Saving!");
                 VaultViewInfo info = plugin.getInVault().get(player.getUniqueId().toString());
-                vaultManager.saveVault(inv, info.getVaultName(), info.getNumber());
                 /* vk2gpz :begin */
-                com.vk2gpz.vklib.mc.playervaults.item.SerializationAPI.saveVault(plugin, player);
+                com.vk2gpz.vklib.mc.inventory.item.SerializationAPI.saveVault(plugin, player);
                 /* vk2gpz :end */
+
                 plugin.getOpenInventories().remove(info.toString());
+            } else {
+                PlayerVaults.debug("Other viewers found, not saving! " + inventory.getViewers().stream().map(HumanEntity::getName).collect(Collectors.joining(" ")));
             }
 
             plugin.getInVault().remove(player.getUniqueId().toString());
@@ -110,9 +117,6 @@ public class Listeners implements Listener {
         }
 
         Player player = (Player) event.getWhoClicked();
-        if (player.hasPermission("playervaults.bypassblockeditems")) {
-            return;
-        }
 
         Inventory clickedInventory = event.getClickedInventory();
         if (clickedInventory != null) {
@@ -121,10 +125,29 @@ public class Listeners implements Listener {
                 int num = info.getNumber();
                 String inventoryTitle = event.getView().getTitle();
                 String title = Lang.VAULT_TITLE.toString().replace("%number", String.valueOf(num)).replace("%p", info.getVaultName());
-                if (((inventoryTitle.equalsIgnoreCase(title)) || event.getCurrentItem() != null)) {
-                    if (event.getCurrentItem() != null && PlayerVaults.getInstance().isBlockedMaterial(event.getCurrentItem().getType())) {
-                        event.setCancelled(true);
-                        player.sendMessage(Lang.TITLE.toString() + Lang.BLOCKED_ITEM.toString().replace("%m", event.getCurrentItem().getType().name()));
+                if (inventoryTitle.equalsIgnoreCase(title)) {
+                    ItemStack[] items = new ItemStack[2];
+                    items[0] = event.getCurrentItem();
+                    if (event.getHotbarButton() > -1 && event.getWhoClicked().getInventory().getItem(event.getHotbarButton()) != null) {
+                        items[1] = event.getWhoClicked().getInventory().getItem(event.getHotbarButton());
+                    }
+
+                    for (ItemStack item : items) {
+                        if (item == null) {
+                            continue;
+                        }
+                        try {
+                            item.toString();
+                        } catch (Exception e) {
+                            player.sendMessage(Lang.TITLE.toString() + Lang.BLOCKED_BAD_ITEM);
+                            event.setCancelled(true);
+                            return;
+                        }
+                        if (!player.hasPermission("playervaults.bypassblockeditems") && PlayerVaults.getInstance().isBlockedMaterial(item.getType())) {
+                            event.setCancelled(true);
+                            player.sendMessage(Lang.TITLE.toString() + Lang.BLOCKED_ITEM.toString().replace("%m", item.getType().name()));
+                            return;
+                        }
                     }
                 }
             }
@@ -138,9 +161,6 @@ public class Listeners implements Listener {
         }
 
         Player player = (Player) event.getWhoClicked();
-        if (player.hasPermission("playervaults.bypassblockeditems")) {
-            return;
-        }
 
         Inventory clickedInventory = event.getInventory();
         if (clickedInventory != null) {
@@ -151,7 +171,14 @@ public class Listeners implements Listener {
                 String title = Lang.VAULT_TITLE.toString().replace("%number", String.valueOf(num)).replace("%p", info.getVaultName());
                 if ((inventoryTitle != null && inventoryTitle.equalsIgnoreCase(title)) && event.getNewItems() != null) {
                     for (ItemStack item : event.getNewItems().values()) {
-                        if (PlayerVaults.getInstance().isBlockedMaterial(item.getType())) {
+                        try {
+                            item.toString();
+                        } catch (Exception e) {
+                            player.sendMessage(Lang.TITLE.toString() + Lang.BLOCKED_BAD_ITEM);
+                            event.setCancelled(true);
+                            continue;
+                        }
+                        if (!player.hasPermission("playervaults.bypassblockeditems") && PlayerVaults.getInstance().isBlockedMaterial(item.getType())) {
                             event.setCancelled(true);
                             player.sendMessage(Lang.TITLE.toString() + Lang.BLOCKED_ITEM.toString().replace("%m", item.getType().name()));
                             return;

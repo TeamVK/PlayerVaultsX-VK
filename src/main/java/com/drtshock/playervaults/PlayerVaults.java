@@ -18,7 +18,13 @@
 
 package com.drtshock.playervaults;
 
-import com.drtshock.playervaults.commands.*;
+import com.drtshock.playervaults.commands.ConvertCommand;
+import com.drtshock.playervaults.commands.DeleteCommand;
+import com.drtshock.playervaults.commands.SignCommand;
+import com.drtshock.playervaults.commands.SignSetInfo;
+import com.drtshock.playervaults.commands.VaultCommand;
+import com.drtshock.playervaults.config.Loader;
+import com.drtshock.playervaults.config.file.Config;
 import com.drtshock.playervaults.listeners.Listeners;
 import com.drtshock.playervaults.listeners.SignListener;
 import com.drtshock.playervaults.listeners.VaultPreloadListener;
@@ -31,6 +37,7 @@ import com.drtshock.playervaults.vaultmanagement.UUIDVaultManager;
 import com.drtshock.playervaults.vaultmanagement.VaultManager;
 import com.drtshock.playervaults.vaultmanagement.VaultViewInfo;
 import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.permission.Permission;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -40,22 +47,29 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.event.inventory.InventoryInteractEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import java.util.logging.Level;
+import java.util.regex.Pattern;
 
 public class PlayerVaults extends JavaPlugin {
-    public static boolean DEBUG = false;
+    public static boolean DEBUG;
     private static PlayerVaults instance;
     private final HashMap<String, SignSetInfo> setSign = new HashMap<>();
     // Player name - VaultViewInfo
@@ -63,73 +77,85 @@ public class PlayerVaults extends JavaPlugin {
     // VaultViewInfo - Inventory
     private final HashMap<String, Inventory> openInventories = new HashMap<>();
     private final Set<Material> blockedMats = new HashSet<>();
-    private Economy economy = null;
-    private boolean useVault = false;
+    private Economy economy;
+    private boolean useVault;
     private YamlConfiguration signs;
     private File signsFile;
     private boolean saveQueued;
     private boolean backupsEnabled;
-    private File backupsFolder = null;
+    private File backupsFolder;
     private File uuidData;
     private File vaultData;
     private String _versionString;
+    private int maxVaultAmountPermTest;
+    private Metrics metrics;
+    private Config config = new Config();
 
     public static PlayerVaults getInstance() {
         return instance;
     }
 
     public static void debug(String s, long start) {
-        long elapsed = System.currentTimeMillis() - start;
-        if (DEBUG || elapsed > 4) {
-            Bukkit.getLogger().log(Level.INFO, "At {0}. Time since start: {1}ms", new Object[]{s, (elapsed)});
+        if (DEBUG) {
+            instance.getLogger().log(Level.INFO, "{0} took {1}ms", new Object[]{s, (System.currentTimeMillis() - start)});
         }
     }
 
     public static void debug(String s) {
         if (DEBUG) {
-            Bukkit.getLogger().log(Level.INFO, s);
+            instance.getLogger().log(Level.INFO, s);
         }
     }
 
     @Override
     public void onEnable() {
         instance = this;
+        long start = System.currentTimeMillis();
+        long time = System.currentTimeMillis();
         loadConfig();
-        DEBUG = getConfig().getBoolean("debug", false);
-        debug("config", System.currentTimeMillis());
+        DEBUG = getConf().isDebug();
+        debug("config", time);
+        time = System.currentTimeMillis();
         uuidData = new File(this.getDataFolder(), "uuidvaults");
         vaultData = new File(this.getDataFolder(), "base64vaults");
-        debug("vaultdata", System.currentTimeMillis());
+        debug("vaultdata", time);
+        time = System.currentTimeMillis();
         getServer().getScheduler().runTask(this, new UUIDConversion()); // Convert to UUIDs first. Class checks if necessary.
-        debug("uuid conversion", System.currentTimeMillis());
+        debug("uuid conversion", time);
+        time = System.currentTimeMillis();
         new VaultManager();
         /*s:vk2gpz*/
         getServer().getScheduler().runTask(this, new com.vk2gpz.vklib.mc.playervaults.tasks.Base64Conversion(vaultData, uuidData));
         /*e:vk2gpz*/
-        debug("base64 conversion", System.currentTimeMillis());
+        debug("base64 conversion", time);
+        time = System.currentTimeMillis();
         loadLang();
-        debug("lang", System.currentTimeMillis());
+        debug("lang", time);
+        time = System.currentTimeMillis();
         new UUIDVaultManager();
-        debug("uuidvaultmanager", System.currentTimeMillis());
+        debug("uuidvaultmanager", time);
+        time = System.currentTimeMillis();
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
         getServer().getPluginManager().registerEvents(new VaultPreloadListener(), this);
         getServer().getPluginManager().registerEvents(new SignListener(this), this);
-        debug("registering listeners", System.currentTimeMillis());
-        this.backupsEnabled = this.getConfig().getBoolean("backups.enabled", true);
+        debug("registering listeners", time);
+        time = System.currentTimeMillis();
+        this.backupsEnabled = this.getConf().getStorage().getFlatFile().isBackups();
+        this.maxVaultAmountPermTest = this.getConf().getMaxVaultAmountPermTest();
         loadSigns();
-        debug("loaded signs", System.currentTimeMillis());
-        debug("check update", System.currentTimeMillis());
+        debug("loaded signs", time);
+        time = System.currentTimeMillis();
         getCommand("pv").setExecutor(new VaultCommand());
         getCommand("pvdel").setExecutor(new DeleteCommand());
         getCommand("pvconvert").setExecutor(new ConvertCommand());
         getCommand("pvsign").setExecutor(new SignCommand());
-        debug("registered commands", System.currentTimeMillis());
+        debug("registered commands", time);
+        time = System.currentTimeMillis();
         useVault = setupEconomy();
-        debug("setup economy", System.currentTimeMillis());
+        debug("setup economy", time);
 
-        if (getConfig().getBoolean("cleanup.enable", false)) {
-            getServer().getScheduler().runTaskAsynchronously(this, new Cleanup(getConfig().getInt("cleanup.lastEdit", 30)));
-            debug("cleanup task", System.currentTimeMillis());
+        if (getConf().getPurge().isEnabled()) {
+            getServer().getScheduler().runTaskAsynchronously(this, new Cleanup(getConf().getPurge().getDaysSinceLastEdit()));
         }
 
         new BukkitRunnable() {
@@ -141,7 +167,117 @@ public class PlayerVaults extends JavaPlugin {
             }
         }.runTaskTimer(this, 20, 20);
 
-        debug("enable done", System.currentTimeMillis());
+        this.metrics = new Metrics(this, 6905);
+        Plugin vault = getServer().getPluginManager().getPlugin("Vault");
+        this.metricsDrillPie("vault", () -> this.metricsPluginInfo(vault));
+        if (vault != null) {
+            this.metricsDrillPie("vault_econ", () -> {
+                Map<String, Map<String, Integer>> map = new HashMap<>();
+                Map<String, Integer> entry = new HashMap<>();
+                entry.put(economy == null ? "none" : economy.getName(), 1);
+                map.put(isEconomyEnabled() ? "enabled" : "disabled", entry);
+                return map;
+            });
+            if (isEconomyEnabled()) {
+                String name = economy.getName();
+                if (name.equals("Essentials Economy")) {
+                    name = "Essentials";
+                }
+                Plugin plugin = getServer().getPluginManager().getPlugin(name);
+                if (plugin != null) {
+                    this.metricsDrillPie("vault_econ_plugins", () -> {
+                        Map<String, Map<String, Integer>> map = new HashMap<>();
+                        Map<String, Integer> entry = new HashMap<>();
+                        entry.put(plugin.getDescription().getVersion(), 1);
+                        map.put(plugin.getName(), entry);
+                        return map;
+                    });
+                }
+            }
+        }
+
+        if (vault != null) {
+            RegisteredServiceProvider<Permission> provider = getServer().getServicesManager().getRegistration(Permission.class);
+            if (provider != null) {
+                Permission perm = provider.getProvider();
+                String name = perm.getName();
+                Plugin plugin = getServer().getPluginManager().getPlugin(name);
+                final String version;
+                if (plugin == null) {
+                    version = "unknown";
+                } else {
+                    version = plugin.getDescription().getVersion();
+                }
+                this.metricsDrillPie("vault_perms", () -> {
+                    Map<String, Map<String, Integer>> map = new HashMap<>();
+                    Map<String, Integer> entry = new HashMap<>();
+                    entry.put(version, 1);
+                    map.put(name, entry);
+                    return map;
+                });
+            }
+        }
+
+        this.metricsSimplePie("signs", () -> getConf().isSigns() ? "enabled" : "disabled");
+        this.metricsSimplePie("cleanup", () -> getConf().getPurge().isEnabled() ? "enabled" : "disabled");
+        this.metricsSimplePie("language", () -> getConf().getLanguage());
+
+        this.metricsDrillPie("block_items", () -> {
+            Map<String, Map<String, Integer>> map = new HashMap<>();
+            Map<String, Integer> entry = new HashMap<>();
+            if (getConf().getItemBlocking().isEnabled()) {
+                for (Material material : blockedMats) {
+                    entry.put(material.toString(), 1);
+                }
+            }
+            if (entry.isEmpty()) {
+                entry.put("none", 1);
+            }
+            map.put(getConf().getItemBlocking().isEnabled() ? "enabled" : "disabled", entry);
+            return map;
+        });
+
+        try {
+            Class<?> clazz = Class.forName(this.getServer().getClass().getPackage().getName() + ".util.CraftNBTTagConfigSerializer");
+            Field field = clazz.getDeclaredField("INTEGER");
+            field.setAccessible(true);
+            Field modifiers = Field.class.getDeclaredField("modifiers");
+            modifiers.setAccessible(true);
+            modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+            Pattern pattern = (Pattern) field.get(null);
+            if (pattern.pattern().equals("[-+]?(?:0|[1-9][0-9]*)?i")) {
+                field.set(null, Pattern.compile("[-+]?(?:0|[1-9][0-9]*)i", Pattern.CASE_INSENSITIVE));
+            }
+            this.getLogger().info("Patched Spigot item storage bug.");
+        } catch (Exception ignored) {
+            // Don't worry about it.
+        }
+
+        this.getLogger().info("Loaded! Took " + (System.currentTimeMillis() - start) + "ms");
+    }
+
+    private void metricsLine(String name, Callable<Integer> callable) {
+        this.metrics.addCustomChart(new Metrics.SingleLineChart(name, callable));
+    }
+
+    private void metricsDrillPie(String name, Callable<Map<String, Map<String, Integer>>> callable) {
+        this.metrics.addCustomChart(new Metrics.DrilldownPie(name, callable));
+    }
+
+    private void metricsSimplePie(String name, Callable<String> callable) {
+        this.metrics.addCustomChart(new Metrics.SimplePie(name, callable));
+    }
+
+    private Map<String, Map<String, Integer>> metricsPluginInfo(Plugin plugin) {
+        return this.metricsInfo(plugin, () -> plugin.getDescription().getVersion());
+    }
+
+    private Map<String, Map<String, Integer>> metricsInfo(Object plugin, Supplier<String> versionGetter) {
+        Map<String, Map<String, Integer>> map = new HashMap<>();
+        Map<String, Integer> entry = new HashMap<>();
+        entry.put(plugin == null ? "nope" : versionGetter.get(), 1);
+        map.put(plugin == null ? "absent" : "present", entry);
+        return map;
     }
 
     @Override
@@ -163,7 +299,7 @@ public class PlayerVaults extends JavaPlugin {
             }
         }
 
-        if (getConfig().getBoolean("cleanup.enable", false)) {
+        if (getConf().getPurge().isEnabled()) {
             saveSignsFile();
         }
     }
@@ -195,12 +331,27 @@ public class PlayerVaults extends JavaPlugin {
     }
 
     private void loadConfig() {
-        saveDefaultConfig();
+        File configYaml = new File(this.getDataFolder(), "config.yml");
+        if (!(new File(this.getDataFolder(), "config.conf").exists()) && configYaml.exists()) {
+            this.config.setFromConfig(this.getLogger(), this.getConfig());
+            try {
+                Files.move(configYaml.toPath(), this.getDataFolder().toPath().resolve("old_unused_config.yml"));
+            } catch (Exception e) {
+                this.getLogger().log(Level.SEVERE, "Failed to move config for backup", e);
+                configYaml.deleteOnExit();
+            }
+        }
+
+        try {
+            Loader.loadAndSave("config", this.config);
+        } catch (IOException | IllegalAccessException e) {
+            this.getLogger().log(Level.SEVERE, "Could not load config.", e);
+        }
 
         // Clear just in case this is a reload.
         blockedMats.clear();
-        if (getConfig().getBoolean("blockitems", false) && getConfig().contains("blocked-items")) {
-            for (String s : getConfig().getStringList("blocked-items")) {
+        if (getConf().getItemBlocking().isEnabled()) {
+            for (String s : getConf().getItemBlocking().getList()) {
                 Material mat = Material.matchMaterial(s);
                 if (mat != null) {
                     blockedMats.add(mat);
@@ -208,6 +359,10 @@ public class PlayerVaults extends JavaPlugin {
                 }
             }
         }
+    }
+
+    public Config getConf() {
+        return this.config;
     }
 
     private void loadSigns() {
@@ -226,7 +381,7 @@ public class PlayerVaults extends JavaPlugin {
     }
 
     private void reloadSigns() {
-        if (!getConfig().getBoolean("signs-enabled")) {
+        if (!getConf().isSigns()) {
             return;
         }
         if (!signsFile.exists()) loadSigns();
@@ -256,7 +411,7 @@ public class PlayerVaults extends JavaPlugin {
     }
 
     private void saveSignsFile() {
-        if (!getConfig().getBoolean("signs-enabled")) {
+        if (!getConf().isSigns()) {
             return;
         }
 
@@ -270,24 +425,13 @@ public class PlayerVaults extends JavaPlugin {
         }
     }
 
-    /**
-     * Set an object in the config.yml
-     *
-     * @param path   The path in the config.
-     * @param object What to be saved.
-     * @param conf   Where to save the object.
-     */
-    public <T> void setInConfig(String path, T object, YamlConfiguration conf) {
-        conf.set(path, object);
-    }
-
     public void loadLang() {
         File folder = new File(getDataFolder(), "lang");
         if (!folder.exists()) {
             folder.mkdir();
         }
 
-        String definedLanguage = getConfig().getString("language", "english");
+        String definedLanguage = getConf().getLanguage();
 
         // Save as default just incase.
         File english = null;
@@ -342,7 +486,7 @@ public class PlayerVaults extends JavaPlugin {
     }
 
     public boolean isEconomyEnabled() {
-        return this.getConfig().getBoolean("economy.enabled", false) && this.useVault;
+        return this.getConf().getEconomy().isEnabled() && this.useVault;
     }
 
     public File getVaultData() {
@@ -409,9 +553,22 @@ public class PlayerVaults extends JavaPlugin {
         return _versionString;
     }
 
+    public int getDefaultVaultRows() {
+        int def = this.config.getDefaultVaultRows();
+        return (def >= 1 && def <= 6) ? def : 6;
+    }
+
+    public int getDefaultVaultSize() {
+        return this.getDefaultVaultRows() * 9;
+    }
+
     public boolean isSign(Material mat) {
         /* vk2gpz : start */
         return com.vk2gpz.vklib.mc.material.MaterialUtil.isSign(mat);
         /* vk2gpz : end */
+    }
+
+    public int getMaxVaultAmountPermTest() {
+        return this.maxVaultAmountPermTest;
     }
 }
